@@ -18,6 +18,7 @@ $continuer = 1;
 $state = 0;
 $chans = array();
 $nbChans = 0;
+$logDir = "./logs/";
 
 function signalHandler($signo)
 {
@@ -45,6 +46,9 @@ $read = array($socket);
 $write = NULL;
 $except = NULL;
 
+$lastCheck = time();
+$lastGen = time();
+
 while($continuer){
     if(($num_streams = stream_select($read, $write, $except, 0)) === false){
         die("C'est cloche ça...\n");
@@ -57,6 +61,21 @@ while($continuer){
         usleep(100);
         newCmd($socket);
     }
+    if(time() - $lastCheck > 30){
+        cmd($s, "LUSERS");
+        cmd($s, "LIST");
+        $lastCheck = time();
+    }
+    if(time() - $lastGen > 300){
+        echo "Generation des historiques !\n";
+        $folders = scandir($logDir);
+        foreach($folders as $f){
+            $cmd = "logs2html $logDir/$f";
+            if($f != "." && $f != ".." && is_dir($logDir."/".$f))
+                system($cmd);
+        }
+        $lastGen = time();
+    }
     $read = array($socket);
 }
 cmd($socket, "QUIT");
@@ -64,13 +83,13 @@ cmd($socket, "QUIT");
 fclose($socket);
 
 function cmd($s, $c){
-    echo ">> $c\n";
+    //echo ">> $c\n";
     fputs($s, "$c\r\n");
 }
 
 function traiter($s, $c){
     global $state, $chans, $nbChans;
-    echo "<< $c";
+    //echo "<< $c";
     $r = preg_match("/^(?:[:](\\S+) )?(\\S+)(?: (?!:)(.+?))?(?: [:](.+))?$/",$c, $m);
     if($r){
         switch($m[2]){
@@ -87,10 +106,17 @@ function traiter($s, $c){
             $nbChans = $t[1];
             break;
         case "322":
-            $t = explode(" ",$m[3]);
-            $chans[] = $t[1];
-            if(count($chans) == $nbChans){
-                $state = STATE_LISTED;
+            if($state == STATE_JOINED){
+                $t = explode(" ",$m[3]);
+                if(!isset($chans[$t[1]]))
+                    cmd($socket, "JOIN {$t[1]}");
+                $chans[$t[1]] = $t[1];
+            }else{
+                $t = explode(" ",$m[3]);
+                $chans[$t[1]] = $t[1];
+                if(count($chans) == $nbChans){
+                    $state = STATE_LISTED;
+                }
             }
             break;
         case "PRIVMSG":
@@ -145,18 +171,22 @@ function processCmd($usr, $cmd){
 }
 
 function logMessage($chan, $usr, $msg, $noUsr = 0){
+    global $logDir;
     $user = explode("!",$usr);
     $user = $user[0];
     if(empty($chan))
         $ch = $user;
     else
         $ch = substr($chan, 1);
-    $filename = date("Ymd").".$ch.log";
+
+    if(!is_dir("$logDir/$ch"))
+        mkdir($logDir."/$ch");
+    $filename = "$ch/".date("Ymd").".log";
     if($noUsr)
         $log = date("Y-m-d\TH:i:s")."  $msg";
     else
         $log = date("Y-m-d\TH:i:s")."  <$user> $msg";
     $log = str_replace("\r","\n",$log);
-    file_put_contents($filename,$log, FILE_APPEND);
+    file_put_contents($logDir."/".$filename,$log, FILE_APPEND);
     echo "Message logged ! ($filename)\n";
 }
