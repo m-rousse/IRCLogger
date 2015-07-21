@@ -2,8 +2,8 @@
 define("STATE_CONNECTED",0);
 define("STATE_REGISTERED",1);
 define("STATE_JOINED",2);
-define("STATE_LISTED;",3);
-//define("STATE_",4);
+define("STATE_LISTED",3);
+define("STATE_LISTING",4);
 //define("STATE_",5);
 //define("STATE_",6);
 set_time_limit(0);
@@ -17,12 +17,13 @@ if (!function_exists('pcntl_signal'))
 $continuer = 1;
 $state = 0;
 $chans = array();
+$nbChans = 0;
 
 function signalHandler($signo)
 {
     global $continuer;
     $continuer = false;
-    printf("Warning: interrupt received, killing server…%s", PHP_EOL);
+    printf("\rWarning: interrupt received, killing server…%s", PHP_EOL);
 }
 pcntl_signal(SIGINT, 'signalHandler');
 
@@ -54,7 +55,7 @@ while($continuer){
         }
     }else{
         usleep(100);
-        newCmd($s);
+        newCmd($socket);
     }
     $read = array($socket);
 }
@@ -68,7 +69,7 @@ function cmd($s, $c){
 }
 
 function traiter($s, $c){
-    global $state;
+    global $state, $chans, $nbChans;
     echo "<< $c";
     $r = preg_match("/^(?:[:](\\S+) )?(\\S+)(?: (?!:)(.+?))?(?: [:](.+))?$/",$c, $m);
     if($r){
@@ -81,6 +82,40 @@ function traiter($s, $c){
                 $state = STATE_REGISTERED;
             }
             break;
+        case "254":
+            $t = explode(" ",$m[3]);
+            $nbChans = $t[1];
+            break;
+        case "322":
+            $t = explode(" ",$m[3]);
+            $chans[] = $t[1];
+            if(count($chans) == $nbChans){
+                $state = STATE_LISTED;
+            }
+            break;
+        case "PRIVMSG":
+            $dst = $m[3];
+            $msg = $m[4];
+            $exp = $m[1];
+            if(substr($dst, 0,1) == "#")
+                logMessage($dst, $exp, $msg);
+            else
+                processCmd($exp, $msg);
+            break;
+        case "PART":
+            $dst = $m[3];
+            $exp = $m[1];
+            $user = explode("!",$exp);
+            $user = $user[0];
+            logMessage($dst, $exp, "*** $user a quitté le chan");
+            break;
+        case "JOIN":
+            $dst = $m[3];
+            $exp = $m[1];
+            $user = explode("!",$exp);
+            $user = $user[0];
+            logMessage($dst, $exp, "*** $user est entré dans le chan");
+            break;
         default:
             break;
         }
@@ -88,9 +123,40 @@ function traiter($s, $c){
 }
 
 function newCmd($s){
-    global $state;
-    if($state == STATE_REGISTERED){
+    global $state, $chans;
+    switch($state){
+    case STATE_REGISTERED:
+        cmd($s, "LUSERS");
         cmd($s, "LIST");
-        $state = STATE_LISTED;
+        $state = STATE_LISTING;
+        break;
+    case STATE_LISTED:
+        foreach($chans as $c)
+            cmd($s, "JOIN $c");
+        $state = STATE_JOINED;
+        break;
+    default:
+        break;
     }
+}
+
+function processCmd($usr, $cmd){
+    echo "Command taken !\n";
+}
+
+function logMessage($chan, $usr, $msg, $noUsr = 0){
+    $user = explode("!",$usr);
+    $user = $user[0];
+    if(empty($chan))
+        $ch = $user;
+    else
+        $ch = substr($chan, 1);
+    $filename = date("Ymd").".$ch.log";
+    if($noUsr)
+        $log = date("Y-m-d\TH:i:s")."  $msg";
+    else
+        $log = date("Y-m-d\TH:i:s")."  <$user> $msg";
+    $log = str_replace("\r","\n",$log);
+    file_put_contents($filename,$log, FILE_APPEND);
+    echo "Message logged ! ($filename)\n";
 }
