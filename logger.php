@@ -133,14 +133,14 @@ function traiter($s, $c){
             $exp = $m[1];
             $user = explode("!",$exp);
             $user = $user[0];
-            logMessage($dst, $exp, "*** $user a quitté le chan");
+            logMessage($dst, $exp, "*** $user a quitté le chan", 1);
             break;
         case "JOIN":
             $dst = $m[3];
             $exp = $m[1];
             $user = explode("!",$exp);
             $user = $user[0];
-            logMessage($dst, $exp, "*** $user est entré dans le chan");
+            logMessage($dst, $exp, "*** $user est entré dans le chan", 1);
             break;
         default:
             break;
@@ -167,7 +167,17 @@ function newCmd($s){
 }
 
 function processCmd($usr, $cmd){
+    global $continuer;
     echo "Command taken !\n";
+    $c = str_replace("\r","",$cmd);
+    var_dump($c);
+    switch($c){
+    case "Quit":
+        $continuer = 0;
+        break;
+    default:
+        break;
+    }
 }
 
 function logMessage($chan, $usr, $msg, $noUsr = 0){
